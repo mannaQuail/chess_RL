@@ -42,6 +42,9 @@ class ChessBoard:
         piece = self.board[start_pos[0]][start_pos[1]]
         tmp_board = copy.deepcopy(self.board)
 
+        if isinstance(piece, King) and self.is_castling_move(start_pos, end_pos):
+            return self.castle(start_pos, end_pos, judge)
+
         if piece and piece.is_valid_move(start_pos, end_pos, self.board):
             if self.board[end_pos[0]][end_pos[1]] is not None:
                 if self.board[end_pos[0]][end_pos[1]].color == turn:
@@ -64,9 +67,99 @@ class ChessBoard:
             if judge:
                 self.board = tmp_board  # Revert the move for judge mode
 
+            if isinstance(piece, (King, Rook)):
+                piece.has_moved = True  # Mark the piece as having moved
+
             return True
 
         return False
+
+    def castle(self, start_pos, end_pos, judge=False):
+        row = start_pos[0]
+
+        # King-side
+        if end_pos[1] > start_pos[1]:
+            rook_start = (row, 7)
+            rook_end = (row, 5)
+
+        # Queen-side
+        else:
+            rook_start = (row, 0)
+            rook_end = (row, 3)
+
+        king = self.board[start_pos[0]][start_pos[1]]
+        rook = self.board[rook_start[0]][rook_start[1]]
+
+        tmp_board = copy.deepcopy(self.board)
+
+        # King 이동
+        self.board[end_pos[0]][end_pos[1]] = king
+        self.board[start_pos[0]][start_pos[1]] = None
+
+        # Rook 이동
+        self.board[rook_end[0]][rook_end[1]] = rook
+        self.board[rook_start[0]][rook_start[1]] = None
+
+        king.has_moved = True
+        rook.has_moved = True
+
+        if self.is_in_check(king.color):
+            self.board = tmp_board
+            return False
+
+        if judge:
+            self.board = tmp_board
+
+        return True
+
+    def is_castling_move(self, start_pos, end_pos):
+        piece = self.board[start_pos[0]][start_pos[1]]
+
+        if not isinstance(piece, King) or piece.has_moved:
+            return False
+
+        # King must move two squares horizontally
+        if start_pos[0] != end_pos[0] or abs(start_pos[1] - end_pos[1]) != 2:
+            return False
+
+        # Find rook
+        rook_col = 0 if end_pos[1] < start_pos[1] else 7
+        rook = self.board[start_pos[0]][rook_col]
+
+        if not isinstance(rook, Rook):
+            return False
+
+        if rook.color != piece.color or rook.has_moved:
+            return False
+
+        # Squares between King and Rook must be empty
+        col_start, col_end = sorted([start_pos[1], rook_col])
+
+        for col in range(col_start + 1, col_end):
+            if self.board[start_pos[0]][col] is not None:
+                return False
+
+        # King cannot castle while in check
+        if self.is_in_check(piece.color):
+            return False
+
+        # King cannot pass through or land on an attacked square
+        opponent = 'black' if piece.color == 'white' else 'white'
+
+        step = 1 if end_pos[1] > start_pos[1] else -1
+
+        for col in range(
+            start_pos[1],
+            end_pos[1] + step,
+            step
+        ):
+            if self.is_square_attacked(
+                (start_pos[0], col),
+                opponent
+            ):
+                return False
+
+        return True
 
     def is_in_check(self, color):
         # Find the king's position
@@ -90,6 +183,22 @@ class ChessBoard:
                 if piece and piece.color != color:
                     if piece.is_valid_move((row, col), king_pos, self.board):
                         return True
+
+        return False
+
+    def is_square_attacked(self, pos, attacking_color):
+        for row in range(8):
+            for col in range(8):
+                piece = self.board[row][col]
+
+                if piece is None:
+                    continue
+
+                if piece.color != attacking_color:
+                    continue
+
+                if piece.is_valid_move((row, col), pos, self.board):
+                    return True
 
         return False
     
@@ -188,7 +297,7 @@ def main():
         if chess_board.is_checkmate(turn):
             print(f"Checkmate! {turn} loses.")
             break
-        
+
         elif chess_board.is_stalemate(turn):
             print(f"Stalemate! The game is a draw.")
             break

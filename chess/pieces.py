@@ -72,6 +72,7 @@ class Rook:
     def __init__(self, color):
         self.color = color
         self.symbol = '♖' if color == 'white' else '♜'
+        self.has_moved = False  # Track if the rook has moved for castling
 
     def is_valid_move(self, start_pos, end_pos, board):
         # Rooks move in straight lines, so either the row or column must be the same
@@ -134,6 +135,7 @@ class King:
     def __init__(self, color):
         self.color = color
         self.symbol = '♔' if color == 'white' else '♚'
+        self.has_moved = False  # Track if the king has moved for castling
 
     def is_valid_move(self, start_pos, end_pos, board):
         # Kings move one square in any direction
