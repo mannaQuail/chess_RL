@@ -5,6 +5,7 @@ class ChessBoard:
     def __init__(self):
         self.board = [[None for _ in range(8)] for _ in range(8)]
         self.setup_board()
+        self.en_passant_target = None  # Track the target square for en passant
 
     def setup_board(self):
         # Set up pawns
@@ -38,41 +39,151 @@ class ChessBoard:
         self.board[0][4] = King('black')
         self.board[7][4] = King('white')
 
+    # def move_piece(self, turn, start_pos, end_pos, new_piece_id=None, judge=False):
+    #     piece = self.board[start_pos[0]][start_pos[1]]
+    #     tmp_board = copy.deepcopy(self.board)
+    #     tmp_en_passant_target = self.en_passant_target  # Save the current en passant target
+
+    #     if piece is None:
+    #         return False
+
+    #     if isinstance(piece, King) and self.is_castling_move(start_pos, end_pos):
+    #         return self.castle(start_pos, end_pos, judge)
+
+    #     if isinstance(piece, Pawn) and self.is_en_passant_move(start_pos, end_pos):
+    #         captured_pos = (start_pos[0], end_pos[1])
+
+    #         # Move pawn
+    #         self.board[end_pos[0]][end_pos[1]] = piece
+    #         self.board[start_pos[0]][start_pos[1]] = None
+
+    #         # Remove captured pawn
+    #         self.board[captured_pos[0]][captured_pos[1]] = None
+
+    #     elif piece and piece.is_valid_move(start_pos, end_pos, self.board):
+    #         if self.board[end_pos[0]][end_pos[1]] is not None:
+    #             if self.board[end_pos[0]][end_pos[1]].color == turn:
+    #                 return False
+
+    #         self.board[end_pos[0]][end_pos[1]] = piece
+    #         self.board[start_pos[0]][start_pos[1]] = None
+
+    #         if new_piece_id is not None:
+    #             if not self.promote_pawn(end_pos, new_piece_id):
+    #                 self.board = tmp_board  # Revert the move
+    #                 self.en_passant_target = tmp_en_passant_target  # Revert the en passant target
+    #                 return False
+
+    #         if self.is_in_check(turn):
+    #             self.board = tmp_board  # Revert the move
+    #             self.en_passant_target = tmp_en_passant_target  # Revert the en passant target
+    #             return False
+
+    #         if judge:
+    #             self.board = tmp_board  # Revert the move for judge mode
+    #             self.en_passant_target = tmp_en_passant_target  # Revert the en passant target
+    #             return True
+
+    #         if isinstance(piece, (King, Rook)):
+    #             piece.has_moved = True  # Mark the piece as having moved
+
+    #         return True
+
+    #     return False
+
     def move_piece(self, turn, start_pos, end_pos, new_piece_id=None, judge=False):
         piece = self.board[start_pos[0]][start_pos[1]]
-        tmp_board = copy.deepcopy(self.board)
 
-        if isinstance(piece, King) and self.is_castling_move(start_pos, end_pos):
+        if piece is None:
+            return False
+
+        if piece.color != turn:
+            return False
+
+        tmp_board = copy.deepcopy(self.board)
+        tmp_en_passant_target = self.en_passant_target
+
+        # -------------------------
+        # Castling
+        # -------------------------
+        if isinstance(piece, King) and self.is_castling_move(
+            start_pos, end_pos
+        ):
             return self.castle(start_pos, end_pos, judge)
 
-        if piece and piece.is_valid_move(start_pos, end_pos, self.board):
-            if self.board[end_pos[0]][end_pos[1]] is not None:
-                if self.board[end_pos[0]][end_pos[1]].color == turn:
-                    return False
+        # -------------------------
+        # En passant
+        # -------------------------
+        elif isinstance(piece, Pawn) and self.is_en_passant_move(
+            start_pos, end_pos
+        ):
+            captured_pos = (start_pos[0], end_pos[1])
 
+            self.board[end_pos[0]][end_pos[1]] = piece
+            self.board[start_pos[0]][start_pos[1]] = None
 
+            self.board[captured_pos[0]][captured_pos[1]] = None
+
+        # -------------------------
+        # Normal move
+        # -------------------------
+        elif piece.is_valid_move(
+            start_pos, end_pos, self.board
+        ):
+
+            target = self.board[end_pos[0]][end_pos[1]]
+
+            if target is not None and target.color == turn:
+                return False
 
             self.board[end_pos[0]][end_pos[1]] = piece
             self.board[start_pos[0]][start_pos[1]] = None
 
             if new_piece_id is not None:
                 if not self.promote_pawn(end_pos, new_piece_id):
-                    self.board = tmp_board  # Revert the move
+                    self.board = tmp_board
+                    self.en_passant_target = tmp_en_passant_target
                     return False
 
-            if self.is_in_check(turn):
-                self.board = tmp_board  # Revert the move
-                return False
+        else:
+            return False
 
-            if judge:
-                self.board = tmp_board  # Revert the move for judge mode
+        # -------------------------
+        # Check validation
+        # -------------------------
+        if self.is_in_check(turn):
+            self.board = tmp_board
+            self.en_passant_target = tmp_en_passant_target
+            return False
 
-            if isinstance(piece, (King, Rook)):
-                piece.has_moved = True  # Mark the piece as having moved
+        # -------------------------
+        # Update en passant target
+        # -------------------------
+        self.en_passant_target = None
 
+        if isinstance(piece, Pawn):
+            if abs(start_pos[0] - end_pos[0]) == 2:
+                middle_row = (start_pos[0] + end_pos[0]) // 2
+                self.en_passant_target = (
+                    middle_row,
+                    start_pos[1]
+                )
+
+        # -------------------------
+        # Judge mode
+        # -------------------------
+        if judge:
+            self.board = tmp_board
+            self.en_passant_target = tmp_en_passant_target
             return True
 
-        return False
+        # -------------------------
+        # Mark moved
+        # -------------------------
+        if isinstance(piece, (King, Rook)):
+            piece.has_moved = True
+
+        return True
 
     def castle(self, start_pos, end_pos, judge=False):
         row = start_pos[0]
@@ -91,6 +202,7 @@ class ChessBoard:
         rook = self.board[rook_start[0]][rook_start[1]]
 
         tmp_board = copy.deepcopy(self.board)
+        tmp_en_passant_target = self.en_passant_target  # Save the current en passant target
 
         # King 이동
         self.board[end_pos[0]][end_pos[1]] = king
@@ -103,12 +215,16 @@ class ChessBoard:
         king.has_moved = True
         rook.has_moved = True
 
+        self.en_passant_target = None
+
         if self.is_in_check(king.color):
             self.board = tmp_board
+            self.en_passant_target = tmp_en_passant_target
             return False
 
         if judge:
             self.board = tmp_board
+            self.en_passant_target = tmp_en_passant_target
 
         return True
 
@@ -161,6 +277,37 @@ class ChessBoard:
 
         return True
 
+    def is_en_passant_move(self, start_pos, end_pos):
+        piece = self.board[start_pos[0]][start_pos[1]]
+
+        if not isinstance(piece, Pawn):
+            return False
+
+        # 현재 앙파상 가능한 칸인지
+        if self.en_passant_target != end_pos:
+            return False
+
+        # Pawn은 대각선 한 칸 이동
+        if abs(end_pos[1] - start_pos[1]) != 1:
+            return False
+
+        direction = -1 if piece.color == 'white' else 1
+
+        if end_pos[0] - start_pos[0] != direction:
+            return False
+
+        # 잡히는 Pawn의 위치
+        captured_pos = (start_pos[0], end_pos[1])
+        captured_piece = self.board[captured_pos[0]][captured_pos[1]]
+
+        if not isinstance(captured_piece, Pawn):
+            return False
+
+        if captured_piece.color == piece.color:
+            return False
+
+        return True
+
     def is_in_check(self, color):
         # Find the king's position
         king_pos = None
@@ -197,8 +344,18 @@ class ChessBoard:
                 if piece.color != attacking_color:
                     continue
 
-                if piece.is_valid_move((row, col), pos, self.board):
-                    return True
+                if isinstance(piece, Pawn):
+                    direction = -1 if attacking_color == 'white' else 1
+
+                    if (
+                        row + direction == pos[0]
+                        and abs(col - pos[1]) == 1
+                    ):
+                        return True
+
+                else:
+                    if piece.is_valid_move((row, col), pos, self.board):
+                        return True
 
         return False
     
