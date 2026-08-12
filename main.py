@@ -1,5 +1,8 @@
 import copy
+import torch
+
 from pieces import Pawn, Rook, Knight, Bishop, Queen, King
+from model import ChessNet
 
 class ChessBoard:
     def __init__(self):
@@ -419,11 +422,51 @@ class ChessBoard:
             print(' '.join([piece.symbol if piece else '.' for piece in row]))
         print('  a b c d e f g h')
 
+def making_input_board(board, en_passant_target):
+    input_board = torch.zeros((13, 8, 8), dtype=torch.float32)
+    for row in range(8):
+        for col in range(8):
+            piece = board[row][col]
+            if piece is not None:
+                piece_index = {
+                    'white': {
+                        'Pawn': 0,
+                        'Rook': 1,
+                        'Knight': 2,
+                        'Bishop': 3,
+                        'Queen': 4,
+                        'King': 5
+                    },
+                    'black': {
+                        'Pawn': 6,
+                        'Rook': 7,
+                        'Knight': 8,
+                        'Bishop': 9,
+                        'Queen': 10,
+                        'King': 11
+                    }
+                }[piece.color][piece.__class__.__name__]
+                input_board[piece_index, row, col] = 1.0
+
+            if isinstance(piece, Pawn) and en_passant_target is not None:
+                if (row, col) == en_passant_target:
+                    input_board[12, row, col] = 1.0
+
+    return input_board
+
 def main():
     chess_board = ChessBoard()
     chess_board.view_board()
+    chess_net = ChessNet()
+    chess_net.eval()  # Set the model to evaluation mode
+
     turn = 'white'
     while True:
+        input_board = making_input_board(chess_board.board, chess_board.en_passant_target)
+        state = torch.tensor([0,0,0,0,0], dtype=torch.float32)  # Example state tensor, adjust as needed
+
+        policy, value = chess_net(input_board.unsqueeze(0), state.unsqueeze(0))  # Add batch dimension
+
         input_move = input("Enter your move (e.g., 'e2 e4'): ")
         if '=' in input_move:
             move_part, promotion_part = input_move.split('=')
@@ -439,6 +482,10 @@ def main():
 
         start = (8 - int(start[1]), ord(start[0]) - ord('a'))
         end = (8 - int(end[1]), ord(end[0]) - ord('a'))
+
+        if chess_board.board[start[0]][start[1]] is None:
+            print("No piece at the starting position.")
+            continue
 
         if turn != chess_board.board[start[0]][start[1]].color:
             print("It's not your turn.")
