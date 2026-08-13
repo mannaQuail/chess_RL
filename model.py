@@ -56,7 +56,7 @@ class ChessNet(nn.Module):
         self.policy_head = nn.Sequential(
             nn.Linear(combined_dim, 512),
             nn.ReLU(),
-            nn.Linear(512, 4096)
+            nn.Linear(512, 4272)  # 4096 for moves + 176 for promotions
         )
 
         # --------------------------------
@@ -78,7 +78,7 @@ class ChessNet(nn.Module):
             [batch, 5]
 
         returns:
-            policy: [batch, 4096]
+            policy: [batch, 4272]
             value:  [batch, 1]
         """
 

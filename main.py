@@ -1,5 +1,6 @@
 import copy
 import torch
+from torch.distributions import Categorical
 
 from pieces import Pawn, Rook, Knight, Bishop, Queen, King
 from model import ChessNet
@@ -361,7 +362,65 @@ class ChessBoard:
                         return True
 
         return False
-    
+
+    def get_castling_rights(self):
+        rights = [
+            False,  # white kingside
+            False,  # white queenside
+            False,  # black kingside
+            False   # black queenside
+        ]
+
+        # White
+        white_king = self.board[7][4]
+
+        if isinstance(white_king, King) and not white_king.has_moved:
+            rook = self.board[7][7]
+            if isinstance(rook, Rook) and rook.color == 'white' and not rook.has_moved:
+                rights[0] = True
+
+            rook = self.board[7][0]
+            if isinstance(rook, Rook) and rook.color == 'white' and not rook.has_moved:
+                rights[1] = True
+
+        # Black
+        black_king = self.board[0][4]
+
+        if isinstance(black_king, King) and not black_king.has_moved:
+            rook = self.board[0][7]
+            if isinstance(rook, Rook) and rook.color == 'black' and not rook.has_moved:
+                rights[2] = True
+
+            rook = self.board[0][0]
+            if isinstance(rook, Rook) and rook.color == 'black' and not rook.has_moved:
+                rights[3] = True
+
+        return rights
+
+    def get_position_key(self, turn):
+        board_state = []
+
+        for row in range(8):
+            for col in range(8):
+                piece = self.board[row][col]
+
+                if piece is None:
+                    board_state.append(None)
+                else:
+                    board_state.append(
+                        (
+                            piece.color,
+                            piece.__class__.__name__
+                        )
+                    )
+
+        return (
+            tuple(board_state),
+            turn,
+            tuple(self.get_castling_rights()),
+            self.en_passant_target
+        )
+
     def promote_pawn(self, pos, new_piece_id):
         piece = self.board[pos[0]][pos[1]]
         if isinstance(piece, Pawn):
@@ -454,20 +513,198 @@ def making_input_board(board, en_passant_target):
 
     return input_board
 
+def making_mask(board, turn):
+    valid_mask = torch.zeros(4272, dtype=torch.bool)  # Adjusted size for 4272 possible moves
+
+    for start_row in range(8):
+        for start_col in range(8):
+            piece = board.board[start_row][start_col]
+            if piece is not None and piece.color == turn:
+                for end_row in range(8):
+                    for end_col in range(8):
+                        if (start_row, start_col) != (end_row, end_col):
+                            if board.move_piece(turn, (start_row, start_col), (end_row, end_col), judge=True):
+                                move_index = (
+                                    start_row * 8 * 8 * 8 +
+                                    start_col * 8 * 8 +
+                                    end_row * 8 +
+                                    end_col
+                                )
+                                valid_mask[move_index] = True
+
+                        if isinstance(piece, Pawn):
+                            if piece.color == 'white' and start_row == 1 and end_row == 0 and abs(start_col - end_col) <= 1:
+                                for new_piece_id in range(4):
+                                    if board.move_piece(turn, (start_row, start_col), (end_row, end_col), new_piece_id, judge=True):
+                                        if start_col == end_col:
+                                            move_index = (
+                                                4096 +
+                                                start_col * 4 + 
+                                                new_piece_id
+                                            )
+                                        elif start_col < end_col:
+                                            move_index = (
+                                                4096 +
+                                                32 + 
+                                                start_col * 4 + 
+                                                new_piece_id
+                                            )
+                                        else:
+                                            move_index = (
+                                                4096 +
+                                                32 + 28 +
+                                                end_col * 4 + 
+                                                new_piece_id
+                                            )
+
+                                        off_move_index = (
+                                            start_row * 8 * 8 * 8 +
+                                            start_col * 8 * 8 +
+                                            end_row * 8 +
+                                            end_col
+                                        )
+
+                                        valid_mask[move_index] = True
+                                        valid_mask[off_move_index] = False
+
+                            elif piece.color == 'black' and start_row == 6 and end_row == 7 and abs(start_col - end_col) <= 1:
+                                for new_piece_id in range(4):
+                                    if board.move_piece(turn, (start_row, start_col), (end_row, end_col), new_piece_id, judge=True):
+                                        if start_col == end_col:
+                                            move_index = (
+                                                4096 +
+                                                88 +
+                                                start_col * 4 + 
+                                                new_piece_id
+                                            )
+                                        elif start_col < end_col:
+                                            move_index = (
+                                                4096 +
+                                                88 + 32 +
+                                                start_col * 4 + 
+                                                new_piece_id
+                                            )
+                                        else:
+                                            move_index = (
+                                                4096 +
+                                                88 + 32 + 28 +
+                                                end_col * 4 + 
+                                                new_piece_id
+                                            )
+                                        off_move_index = (
+                                            start_row * 8 * 8 * 8 +
+                                            start_col * 8 * 8 +
+                                            end_row * 8 +
+                                            end_col
+                                        )
+                                        valid_mask[move_index] = True
+                                        valid_mask[off_move_index] = False
+
+    return valid_mask
+
+def action_parser(action):
+    if action < 4096:
+        start_row = action // (8 * 8 * 8)
+        start_col = (action // (8 * 8)) % 8
+        end_row = (action // 8) % 8
+        end_col = action % 8
+        return (start_row, start_col), (end_row, end_col), None
+    elif action >= 4096 and action < 4184:
+        promotion_action = action - 4096
+        if promotion_action < 32:
+            start_row = 1
+            start_col = promotion_action // 4
+            end_row = 0
+            end_col = start_col
+            new_piece_id = promotion_action % 4
+        elif promotion_action < 60:
+            promotion_action -= 32
+            start_row = 1
+            start_col = promotion_action // 4 + 1
+            end_row = 0
+            end_col = start_col - 1
+            new_piece_id = promotion_action % 4
+        elif promotion_action < 88:
+            promotion_action -= 60
+            start_row = 1
+            start_col = promotion_action // 4 + 2
+            end_row = 0
+            end_col = start_col - 2
+            new_piece_id = promotion_action % 4
+    else:
+        promotion_action = action - 4184
+        if promotion_action < 32:
+            start_row = 6
+            start_col = promotion_action // 4
+            end_row = 7
+            end_col = start_col
+            new_piece_id = promotion_action % 4
+        elif promotion_action < 60:
+            promotion_action -= 32
+            start_row = 6
+            start_col = promotion_action // 4 + 1
+            end_row = 7
+            end_col = start_col - 1
+            new_piece_id = promotion_action % 4
+        elif promotion_action < 88:
+            promotion_action -= 60
+            start_row = 6
+            start_col = promotion_action // 4 + 2
+            end_row = 7
+            end_col = start_col - 2
+            new_piece_id = promotion_action % 4
+
+        return (start_row, start_col), (end_row, end_col), new_piece_id
+
 def main():
     chess_board = ChessBoard()
+
+    position_history = {}
+
+    initial_key = chess_board.get_position_key('white')
+    position_history[initial_key] = 1
+
     chess_board.view_board()
     chess_net = ChessNet()
     chess_net.eval()  # Set the model to evaluation mode
 
+    state = torch.tensor([0,0,0,0,0], dtype=torch.float32)  # Example state tensor, adjust as needed
+
     turn = 'white'
     while True:
         input_board = making_input_board(chess_board.board, chess_board.en_passant_target)
-        state = torch.tensor([0,0,0,0,0], dtype=torch.float32)  # Example state tensor, adjust as needed
 
+        state[0] = 0 if turn == 'white' else 1
+
+        state[1:] = torch.tensor(chess_board.get_castling_rights(), dtype=torch.float32)
+
+        print(chess_board.get_castling_rights())
+        
+        
         policy, value = chess_net(input_board.unsqueeze(0), state.unsqueeze(0))  # Add batch dimension
+    
+        valid_mask = making_mask(chess_board, turn)
+        policy = policy.masked_fill(~valid_mask, -torch.inf)  # Mask invalid moves
 
-        input_move = input("Enter your move (e.g., 'e2 e4'): ")
+        action = torch.argmax(policy, dim=-1)  # Select the move with the highest probability
+
+        start_net, end_net, new_piece_id_net = action_parser(action)
+        print(f"Turn: {turn}, Move: {chr(ord('a')+start_net[1])}{8 - int(start_net[0])} to {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}, Promotion: {new_piece_id_net}")
+
+        # dist = Categorical(logits=policy)
+
+        # action = dist.sample()
+        # log_prob = dist.log_prob(action)
+
+        # input_move = input("Enter your move (e.g., 'e2 e4'): ")
+        if new_piece_id_net == None:
+            input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}"
+        else:
+            input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}={new_piece_id_net}"
+
+        print(f"AI Move: {input_move}")
+
+
         if '=' in input_move:
             move_part, promotion_part = input_move.split('=')
             start, end = move_part.split()
@@ -493,10 +730,23 @@ def main():
 
         if not chess_board.move_piece(turn, start, end, new_piece_id):
             print("Invalid move. Try again.")
-        else:
-            turn = 'black' if turn == 'white' else 'white'
+            continue
+
+        turn = 'black' if turn == 'white' else 'white'
+
+        # 현재 position 기록
+        position_key = chess_board.get_position_key(turn)
+
+        position_history[position_key] = (
+            position_history.get(position_key, 0) + 1
+        )
 
         chess_board.view_board()
+
+        # Threefold repetition
+        if position_history[position_key] >= 3:
+            print("Draw by threefold repetition.")
+            break
 
         if chess_board.is_checkmate(turn):
             print(f"Checkmate! {turn} loses.")
