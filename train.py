@@ -1,6 +1,6 @@
 import torch
 
-from model import ChessNet
+from model import ChessNet, ChessNetTransformer
 from ppo import PPOTrainer
 from chess_board import ChessBoard, making_input_board, making_mask, action_parser
 
@@ -221,11 +221,11 @@ def play_game(trainer, device, max_moves=200):
                 # Draw
                 if threefold_repetition:
                     # Threefold repetition
-                    trajectories["white"]["rewards"][-1] = 0.0
-                    trajectories["black"]["rewards"][-1] = 0.0
+                    trajectories["white"]["rewards"][-1] = -0.01
+                    trajectories["black"]["rewards"][-1] = 0.01
                 else:
-                    trajectories["white"]["rewards"][-1] = 0.0
-                    trajectories["black"]["rewards"][-1] = 0.0
+                    trajectories["white"]["rewards"][-1] = -0.01
+                    trajectories["black"]["rewards"][-1] = 0.01
 
             # 실제 게임 종료
             trajectories["white"]["dones"][-1] = True
@@ -309,9 +309,13 @@ def main():
     # Model
     # -----------------------------------
 
-    model = ChessNet().to(device)
+    starting_step = 1200
+    weight_name = f"./weights/transformer/chess_ppo_{starting_step}.pth"
+
+    # model = ChessNet().to(device)
+    model = ChessNetTransformer().to(device)
     model.load_state_dict(
-        torch.load("chess_ppo_500.pth", map_location=device)
+        torch.load(weight_name, map_location=device)
     )
 
     # -----------------------------------
@@ -325,7 +329,7 @@ def main():
         gae_lambda=0.95,
         clip_eps=0.2,
         value_coef=0.5,
-        entropy_coef=0.01,
+        entropy_coef=0.04,
         update_epochs=4,
     )
 
@@ -334,8 +338,11 @@ def main():
     # -----------------------------------
 
     num_games = 10000
+    num_white_wins = 0
+    num_black_wins = 0
+    num_draws = 0
 
-    for game in range(500, num_games):
+    for game in range(starting_step, num_games):
 
         trajectories, winner, num_moves = play_game(
             trainer,
@@ -347,6 +354,7 @@ def main():
             f"Winner: {winner} | "
             f"Moves: {num_moves}"
         )
+            
 
         # -----------------------------------
         # PPO update
@@ -401,16 +409,17 @@ def main():
         # Save model
         # -----------------------------------
 
-        if (game + 1) % 100 == 0:
+        if (game + 1) % 200 == 0:
 
             torch.save(
                 model.state_dict(),
-                f"chess_ppo_{game + 1}.pth"
+                f"./weights/transformer/chess_ppo_{game + 1}.pth"
             )
 
             print(
-                f"Model saved: chess_ppo_{game + 1}.pth"
+                f"Model saved: ./weights/transformer/chess_ppo_{game + 1}.pth"
             )
+
 
 
 if __name__ == "__main__":

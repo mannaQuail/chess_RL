@@ -4,12 +4,13 @@ import os
 import time
 
 from pieces import Pawn, Rook, Knight, Bishop, Queen, King
-from model import ChessNet
+from model import ChessNet, ChessNetTransformer
 
 class ChessBoard:
-    def __init__(self):
+    def __init__(self, setup=True):
         self.board = [[None for _ in range(8)] for _ in range(8)]
-        self.setup_board()
+        if setup==True:
+            self.setup_board()
         self.en_passant_target = None  # Track the target square for en passant
 
     def setup_board(self):
@@ -43,58 +44,6 @@ class ChessBoard:
         # Set up kings
         self.board[0][4] = King('black')
         self.board[7][4] = King('white')
-
-    # def move_piece(self, turn, start_pos, end_pos, new_piece_id=None, judge=False):
-    #     piece = self.board[start_pos[0]][start_pos[1]]
-    #     tmp_board = copy.deepcopy(self.board)
-    #     tmp_en_passant_target = self.en_passant_target  # Save the current en passant target
-
-    #     if piece is None:
-    #         return False
-
-    #     if isinstance(piece, King) and self.is_castling_move(start_pos, end_pos):
-    #         return self.castle(start_pos, end_pos, judge)
-
-    #     if isinstance(piece, Pawn) and self.is_en_passant_move(start_pos, end_pos):
-    #         captured_pos = (start_pos[0], end_pos[1])
-
-    #         # Move pawn
-    #         self.board[end_pos[0]][end_pos[1]] = piece
-    #         self.board[start_pos[0]][start_pos[1]] = None
-
-    #         # Remove captured pawn
-    #         self.board[captured_pos[0]][captured_pos[1]] = None
-
-    #     elif piece and piece.is_valid_move(start_pos, end_pos, self.board):
-    #         if self.board[end_pos[0]][end_pos[1]] is not None:
-    #             if self.board[end_pos[0]][end_pos[1]].color == turn:
-    #                 return False
-
-    #         self.board[end_pos[0]][end_pos[1]] = piece
-    #         self.board[start_pos[0]][start_pos[1]] = None
-
-    #         if new_piece_id is not None:
-    #             if not self.promote_pawn(end_pos, new_piece_id):
-    #                 self.board = tmp_board  # Revert the move
-    #                 self.en_passant_target = tmp_en_passant_target  # Revert the en passant target
-    #                 return False
-
-    #         if self.is_in_check(turn):
-    #             self.board = tmp_board  # Revert the move
-    #             self.en_passant_target = tmp_en_passant_target  # Revert the en passant target
-    #             return False
-
-    #         if judge:
-    #             self.board = tmp_board  # Revert the move for judge mode
-    #             self.en_passant_target = tmp_en_passant_target  # Revert the en passant target
-    #             return True
-
-    #         if isinstance(piece, (King, Rook)):
-    #             piece.has_moved = True  # Mark the piece as having moved
-
-    #         return True
-
-    #     return False
 
     def move_piece(self, turn, start_pos, end_pos, new_piece_id=None, judge=False):
         piece = self.board[start_pos[0]][start_pos[1]]
@@ -659,7 +608,34 @@ def action_parser(action):
 
         return (start_row, start_col), (end_row, end_col), new_piece_id
 
+def testing_model(model, puzzles):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    state = torch.tensor([0,0,0,0,0], dtype=torch.float32).to(device)
+
+    for puzzle in puzzles:
+        puzzle.view_board()
+        input_board = making_input_board(puzzle.board, puzzle.en_passant_target).to(device)
+        state[0] = 0
+        
+        state[1:] = torch.tensor(puzzle.get_castling_rights(), dtype=torch.float32)
+
+        policy, value = model(input_board.unsqueeze(0), state.unsqueeze(0))  # Add batch dimension
+                    
+        valid_mask = making_mask(puzzle, 'white').to(device)
+        policy = policy.masked_fill(~valid_mask, -torch.inf)  # Mask invalid moves
+
+        action = torch.argmax(policy, dim=-1)  # Select the move with the highest probability
+
+        start_net, end_net, new_piece_id_net = action_parser(action)
+        print(f"Turn: 'white', Move: {chr(ord('a')+start_net[1])}{8 - int(start_net[0])} to {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}, Promotion: {new_piece_id_net}, Value: {value.item()}")
+
+    
+
 def main():
+    two_models = True  # Set to True to use two different models for white and black
+    ai = "black"  # Start with white player
+
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     chess_board = ChessBoard()
@@ -670,80 +646,124 @@ def main():
     position_history[initial_key] = 1
 
     chess_board.view_board()
-    chess_net1 = ChessNet().to(device)
-    chess_net2 = ChessNet().to(device)
 
-    chess_net1.load_state_dict(torch.load("chess_ppo_100.pth", map_location=device))
+    chess_net1 = ChessNetTransformer().to(device)
+
+    chess_net1.load_state_dict(torch.load("./weights/transformer/chess_ppo_1000.pth", map_location=device))
     chess_net1.to(device)
-    chess_net2.load_state_dict(torch.load("chess_ppo_500.pth", map_location=device))
-    chess_net2.to(device)
 
     chess_net1.eval()  # Set the model to evaluation mode
-    chess_net2.eval()  # Set the model to evaluation mode
+
+
+
+    if two_models:
+        chess_net2 = ChessNetTransformer().to(device)
+        
+        chess_net2.load_state_dict(torch.load("./weights/transformer/chess_ppo_1200.pth", map_location=device))
+        chess_net2.to(device)
+
+        chess_net2.eval()  # Set the model to evaluation mode
+
 
     state = torch.tensor([0,0,0,0,0], dtype=torch.float32).to(device)  # Example state tensor, adjust as needed
 
     turn = 'white'
+    turn_num = 0
     while True:
+        if two_models:
+            print(f"Turn num: {turn_num}")
+            if turn == ai:
+                input_board = making_input_board(chess_board.board, chess_board.en_passant_target).to(device)
+                state[0] = 0 if turn == 'white' else 1
 
-        if turn == 'white':
-            input_board = making_input_board(chess_board.board, chess_board.en_passant_target).to(device)
-            state[0] = 0 if turn == 'white' else 1
+                state[1:] = torch.tensor(chess_board.get_castling_rights(), dtype=torch.float32)
 
-            state[1:] = torch.tensor(chess_board.get_castling_rights(), dtype=torch.float32)
-
-            print(chess_board.get_castling_rights())
+                print(chess_board.get_castling_rights())
+                
+                
+                policy, value = chess_net1(input_board.unsqueeze(0), state.unsqueeze(0))  # Add batch dimension
             
-            
-            policy, value = chess_net1(input_board.unsqueeze(0), state.unsqueeze(0))  # Add batch dimension
-        
-            valid_mask = making_mask(chess_board, turn).to(device)
-            policy = policy.masked_fill(~valid_mask, -torch.inf)  # Mask invalid moves
+                valid_mask = making_mask(chess_board, turn).to(device)
+                policy = policy.masked_fill(~valid_mask, -torch.inf)  # Mask invalid moves
 
-            action = torch.argmax(policy, dim=-1)  # Select the move with the highest probability
+                action = torch.argmax(policy, dim=-1)  # Select the move with the highest probability
 
-            start_net, end_net, new_piece_id_net = action_parser(action)
-            print(f"Turn: {turn}, Move: {chr(ord('a')+start_net[1])}{8 - int(start_net[0])} to {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}, Promotion: {new_piece_id_net}, Value: {value.item()}")
+                start_net, end_net, new_piece_id_net = action_parser(action)
+                print(f"Turn: {turn}, Move: {chr(ord('a')+start_net[1])}{8 - int(start_net[0])} to {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}, Promotion: {new_piece_id_net}, Value: {value.item()}")
 
-        # dist = Categorical(logits=policy)
+            # dist = Categorical(logits=policy)
 
-        # action = dist.sample()
-        # log_prob = dist.log_prob(action)
+            # action = dist.sample()
+            # log_prob = dist.log_prob(action)
 
-        # input_move = input("Enter your move (e.g., 'e2 e4'): ")
-            if new_piece_id_net == None:
-                input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}"
-            else:
-                input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}={new_piece_id_net}"
-
-            print(f"AI Move: {input_move}")
-
-        else:
             # input_move = input("Enter your move (e.g., 'e2 e4'): ")
-            input_board = making_input_board(chess_board.board, chess_board.en_passant_target).to(device)
-            state[0] = 0 if turn == 'white' else 1
+                if new_piece_id_net == None:
+                    input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}"
+                else:
+                    input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}={new_piece_id_net}"
 
-            state[1:] = torch.tensor(chess_board.get_castling_rights(), dtype=torch.float32)
+                print(f"AI Move: {input_move}")
 
-            print(chess_board.get_castling_rights())
-            
-            
-            policy, value = chess_net2(input_board.unsqueeze(0), state.unsqueeze(0))  # Add batch dimension
-        
-            valid_mask = making_mask(chess_board, turn).to(device)
-            policy = policy.masked_fill(~valid_mask, -torch.inf)  # Mask invalid moves
-
-            action = torch.argmax(policy, dim=-1)  # Select the move with the highest probability
-
-            start_net, end_net, new_piece_id_net = action_parser(action)
-            print(f"Turn: {turn}, Move: {chr(ord('a')+start_net[1])}{8 - int(start_net[0])} to {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}, Promotion: {new_piece_id_net}, Value: {value.item()}")
-
-            if new_piece_id_net == None:
-                input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}"
             else:
-                input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}={new_piece_id_net}"
+                # input_move = input("Enter your move (e.g., 'e2 e4'): ")
+                input_board = making_input_board(chess_board.board, chess_board.en_passant_target).to(device)
+                state[0] = 0 if turn == 'white' else 1
 
-            print(f"AI Move: {input_move}")
+                state[1:] = torch.tensor(chess_board.get_castling_rights(), dtype=torch.float32)
+
+                print(chess_board.get_castling_rights())
+                
+                
+                policy, value = chess_net2(input_board.unsqueeze(0), state.unsqueeze(0))  # Add batch dimension
+            
+                valid_mask = making_mask(chess_board, turn).to(device)
+                policy = policy.masked_fill(~valid_mask, -torch.inf)  # Mask invalid moves
+
+                action = torch.argmax(policy, dim=-1)  # Select the move with the highest probability
+
+                start_net, end_net, new_piece_id_net = action_parser(action)
+                print(f"Turn: {turn}, Move: {chr(ord('a')+start_net[1])}{8 - int(start_net[0])} to {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}, Promotion: {new_piece_id_net}, Value: {value.item()}")
+
+                if new_piece_id_net == None:
+                    input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}"
+                else:
+                    input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}={new_piece_id_net}"
+
+                print(f"AI Move: {input_move}")
+        else:
+            if turn == ai:
+                input_board = making_input_board(chess_board.board, chess_board.en_passant_target).to(device)
+                state[0] = 0 if turn == 'white' else 1
+
+                state[1:] = torch.tensor(chess_board.get_castling_rights(), dtype=torch.float32)
+
+                print(chess_board.get_castling_rights())
+                
+                
+                policy, value = chess_net1(input_board.unsqueeze(0), state.unsqueeze(0))  # Add batch dimension
+            
+                valid_mask = making_mask(chess_board, turn).to(device)
+                policy = policy.masked_fill(~valid_mask, -torch.inf)  # Mask invalid moves
+
+                action = torch.argmax(policy, dim=-1)  # Select the move with the highest probability
+
+                start_net, end_net, new_piece_id_net = action_parser(action)
+                print(f"Turn: {turn}, Move: {chr(ord('a')+start_net[1])}{8 - int(start_net[0])} to {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}, Promotion: {new_piece_id_net}, Value: {value.item()}")
+
+            # dist = Categorical(logits=policy)
+
+            # action = dist.sample()
+            # log_prob = dist.log_prob(action)
+
+            # input_move = input("Enter your move (e.g., 'e2 e4'): ")
+                if new_piece_id_net == None:
+                    input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}"
+                else:
+                    input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}={new_piece_id_net}"
+
+                print(f"AI Move: {input_move}")
+            else:
+                input_move = input("Enter your move (e.g., 'e2 e4'): ")
 
 
         if '=' in input_move:
@@ -796,6 +816,8 @@ def main():
         elif chess_board.is_stalemate(turn):
             print(f"Stalemate! The game is a draw.")
             break
+
+        turn_num += 1
 
 if __name__ == "__main__":
     main()
