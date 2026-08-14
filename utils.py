@@ -33,4 +33,10 @@ def parse_args():
         default="white"
     )
 
+    parser.add_argument(
+        "--train_start_num",
+        type=int,
+        default=0
+    )
+
     return parser.parse_args()

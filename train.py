@@ -3,6 +3,7 @@ import torch
 from model import ChessNet, ChessNetTransformer
 from ppo import PPOTrainer
 from chess_board import ChessBoard, making_input_board, making_mask, action_parser
+from utils import parse_args
 
 
 def make_state(board, turn):
@@ -292,6 +293,9 @@ def convert_trajectory(trajectory):
 
 
 def main():
+
+    args = parse_args()
+
     print("Starting training...")
     # -----------------------------------
     # Device
@@ -309,7 +313,7 @@ def main():
     # Model
     # -----------------------------------
 
-    starting_step = 1400
+    starting_step = args.train_start_num
     weight_name = f"./weights/transformer/chess_ppo_{starting_step}.pth"
 
     # model = ChessNet().to(device)

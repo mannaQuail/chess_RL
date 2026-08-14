@@ -115,9 +115,12 @@ def testing_model(model, puzzles):
         start_net, end_net, new_piece_id_net = action_parser(action)
         print(f"Turn: 'white', Move: {chr(ord('a')+start_net[1])}{8 - int(start_net[0])} to {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}, Promotion: {new_piece_id_net}, Value: {value.item()}")
 
-        if f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])}" == puzzles.one_move_mate_answer[i]:
+        print()
+        if f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}" == puzzles.one_move_mate_answer[i]:
+            print("correct\n")
             answer_num += 1
-
+        else:
+            print("wrong\n")
 
     print(f"Total Correct Num: {answer_num}/{puzzles.one_move_mate_num}")
 
