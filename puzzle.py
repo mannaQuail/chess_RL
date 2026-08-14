@@ -1,6 +1,7 @@
 from chess_board import ChessBoard, making_input_board, making_mask, action_parser
 from pieces import Pawn, Rook, Knight, Bishop, Queen, King
-from model import ChessNetTransformer
+from model import ChessNet, ChessNetTransformer
+from utils import parse_args
 
 import torch
 
@@ -123,13 +124,18 @@ def testing_model(model, puzzles):
 
 
 def main():
+    args = parse_args()
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     puzzle = Puzzle()
 
-    chess_net1 = ChessNetTransformer().to(device)
+    if args.model1_type=="cnn":
+        chess_net1 = ChessNet().to(device)
+    else:
+        chess_net1 = ChessNetTransformer().to(device)
     
-    chess_net1.load_state_dict(torch.load("./weights/transformer/chess_ppo_1200.pth", map_location=device))
+    chess_net1.load_state_dict(torch.load(args.model1_weight, map_location=device))
     chess_net1.to(device)
 
     chess_net1.eval()  # Set the model to evaluation mode

@@ -5,6 +5,7 @@ import time
 
 from pieces import Pawn, Rook, Knight, Bishop, Queen, King
 from model import ChessNet, ChessNetTransformer
+from utils import parse_args
 
 class ChessBoard:
     def __init__(self, setup=True):
@@ -629,12 +630,11 @@ def testing_model(model, puzzles):
         start_net, end_net, new_piece_id_net = action_parser(action)
         print(f"Turn: 'white', Move: {chr(ord('a')+start_net[1])}{8 - int(start_net[0])} to {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}, Promotion: {new_piece_id_net}, Value: {value.item()}")
 
-    
+
 
 def main():
-    two_models = True  # Set to True to use two different models for white and black
-    ai = "black"  # Start with white player
 
+    args = parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
@@ -647,39 +647,56 @@ def main():
 
     chess_board.view_board()
 
-    chess_net1 = ChessNetTransformer().to(device)
+    if args.model1_type=="cnn":
+        chess_net1 = ChessNet().to(device)
 
-    chess_net1.load_state_dict(torch.load("./weights/transformer/chess_ppo_1000.pth", map_location=device))
+        print("\nCurrent Model1 type: CNN")
+        
+    else:
+        chess_net1 = ChessNetTransformer().to(device)
+
+        print("\nCurrent Model1 type: Transformer")
+
+    chess_net1.load_state_dict(torch.load(args.model1_weight, map_location=device))
+    print(f"Model1 weight loaded: {args.model1_weight}\n")
     chess_net1.to(device)
 
     chess_net1.eval()  # Set the model to evaluation mode
 
 
 
-    if two_models:
-        chess_net2 = ChessNetTransformer().to(device)
-        
-        chess_net2.load_state_dict(torch.load("./weights/transformer/chess_ppo_1200.pth", map_location=device))
+    if args.model2_type is not None:
+        if args.model2_type == "cnn":
+            chess_net2 = ChessNet().to(device)
+            print("\nCurrent Model2 type: CNN")
+        else:
+            chess_net2 = ChessNetTransformer().to(device)
+            print("\nCurrent Model2 type: Transformer")
+
+        chess_net2.load_state_dict(torch.load(args.model2_weight, map_location=device))
+        print(f"Model2 weight loaded: {args.model2_weight}\n")
         chess_net2.to(device)
 
         chess_net2.eval()  # Set the model to evaluation mode
+
+    print(f"Model1 role: {args.ai_role}\n")
 
 
     state = torch.tensor([0,0,0,0,0], dtype=torch.float32).to(device)  # Example state tensor, adjust as needed
 
     turn = 'white'
     turn_num = 0
+
     while True:
-        if two_models:
+        if args.model2_type is not None:
             print(f"Turn num: {turn_num}")
-            if turn == ai:
+            if turn == args.ai_role:
                 input_board = making_input_board(chess_board.board, chess_board.en_passant_target).to(device)
                 state[0] = 0 if turn == 'white' else 1
 
                 state[1:] = torch.tensor(chess_board.get_castling_rights(), dtype=torch.float32)
 
                 print(chess_board.get_castling_rights())
-                
                 
                 policy, value = chess_net1(input_board.unsqueeze(0), state.unsqueeze(0))  # Add batch dimension
             
@@ -691,16 +708,10 @@ def main():
                 start_net, end_net, new_piece_id_net = action_parser(action)
                 print(f"Turn: {turn}, Move: {chr(ord('a')+start_net[1])}{8 - int(start_net[0])} to {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}, Promotion: {new_piece_id_net}, Value: {value.item()}")
 
-            # dist = Categorical(logits=policy)
-
-            # action = dist.sample()
-            # log_prob = dist.log_prob(action)
-
-            # input_move = input("Enter your move (e.g., 'e2 e4'): ")
                 if new_piece_id_net == None:
                     input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}"
                 else:
-                    input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}={new_piece_id_net}"
+                    input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}={int(new_piece_id_net)}"
 
                 print(f"AI Move: {input_move}")
 
@@ -727,11 +738,11 @@ def main():
                 if new_piece_id_net == None:
                     input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}"
                 else:
-                    input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}={new_piece_id_net}"
+                    input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}={int(new_piece_id_net)}"
 
                 print(f"AI Move: {input_move}")
         else:
-            if turn == ai:
+            if turn == args.ai_role:
                 input_board = making_input_board(chess_board.board, chess_board.en_passant_target).to(device)
                 state[0] = 0 if turn == 'white' else 1
 
@@ -750,12 +761,6 @@ def main():
                 start_net, end_net, new_piece_id_net = action_parser(action)
                 print(f"Turn: {turn}, Move: {chr(ord('a')+start_net[1])}{8 - int(start_net[0])} to {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}, Promotion: {new_piece_id_net}, Value: {value.item()}")
 
-            # dist = Categorical(logits=policy)
-
-            # action = dist.sample()
-            # log_prob = dist.log_prob(action)
-
-            # input_move = input("Enter your move (e.g., 'e2 e4'): ")
                 if new_piece_id_net == None:
                     input_move = f"{chr(ord('a')+start_net[1])}{8 - int(start_net[0])} {chr(ord('a')+end_net[1])}{8 - int(end_net[0])}"
                 else:

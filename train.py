@@ -309,7 +309,7 @@ def main():
     # Model
     # -----------------------------------
 
-    starting_step = 1200
+    starting_step = 1400
     weight_name = f"./weights/transformer/chess_ppo_{starting_step}.pth"
 
     # model = ChessNet().to(device)
@@ -337,7 +337,7 @@ def main():
     # Training
     # -----------------------------------
 
-    num_games = 10000
+    num_games = 40000
     num_white_wins = 0
     num_black_wins = 0
     num_draws = 0
@@ -409,7 +409,7 @@ def main():
         # Save model
         # -----------------------------------
 
-        if (game + 1) % 200 == 0:
+        if (game + 1) % 800 == 0:
 
             torch.save(
                 model.state_dict(),
